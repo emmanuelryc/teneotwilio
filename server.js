@@ -20,61 +20,59 @@ const bodyParser = require('body-parser');
 const MessagingResponse = require('twilio').twiml.MessagingResponse;
 const TIE = require('@artificialsolutions/tie-api-client');
 
-const port = process.env.PORT || 4337;
+const port = process.env.PORT || 3000; // Usa el puerto de Railway o 3000 como fallback
 const teneoEngineUrl = process.env.TENEO_ENGINE_URL;
 
+if (!teneoEngineUrl) {
+  console.error("ERROR: La variable de entorno TENEO_ENGINE_URL no está definida.");
+  process.exit(1); // Detener la ejecución si falta la URL de Teneo
+}
+
+console.log(`✅ Servidor iniciando con la URL de Teneo: ${teneoEngineUrl}`);
+
 const app = express();
-
-// initalise teneo
 const teneoApi = TIE.init(teneoEngineUrl);
-
-// initialise session handler, to store mapping between sender's phone number and the engine session id
 const sessionHandler = SessionHandler();
 
 app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json()); // Asegurar que podamos recibir datos en formato JSON
+app.use(bodyParser.json());
 
-// Ruta principal (esto antes respondía a "/")
+// Rutas disponibles
 app.post("/", handleTwilioMessages(sessionHandler));
-
-// Nueva ruta para Twilio WhatsApp
 app.post("/whatsapp", handleTwilioMessages(sessionHandler));
 
-// Manejo de mensajes de Twilio
 function handleTwilioMessages(sessionHandler) {
   return async (req, res) => {
-    console.log("Solicitud recibida en /whatsapp");
+    console.log("📩 Mensaje recibido en /whatsapp");
 
-    // Obtener el número del remitente
     const from = req.body.From;
-    console.log(`from: ${from}`);
-
-    // Obtener el mensaje enviado por el usuario
     const userInput = req.body.Body;
-    console.log(`userInput: ${userInput}`);
 
-    // Verificar si tenemos una sesión almacenada para este usuario
+    console.log(`👤 De: ${from}`);
+    console.log(`📝 Mensaje: ${userInput}`);
+
+    if (!from || !userInput) {
+      console.error("❌ Error: Datos inválidos en la solicitud.");
+      return res.status(400).send("Solicitud inválida");
+    }
+
     const teneoSessionId = sessionHandler.getSession(from);
 
     try {
-      // Enviar el input al motor de Teneo y recibir la respuesta
       const teneoResponse = await teneoApi.sendInput(teneoSessionId, { 'text': userInput, 'channel': 'twilio-whatsapp' });
-      console.log(`teneoResponse: ${teneoResponse.output.text}`);
 
-      // Almacenar el sessionId del motor de Teneo
+      console.log(`🤖 Respuesta de Teneo: ${teneoResponse.output.text}`);
+
       sessionHandler.setSession(from, teneoResponse.sessionId);
-
-      // Responder a Twilio
       sendTwilioMessage(teneoResponse, res);
 
     } catch (error) {
-      console.error("Error al procesar el mensaje con Teneo:", error);
+      console.error("❌ Error al procesar el mensaje con Teneo:", error);
       res.status(500).send("Error interno del servidor");
     }
   };
 }
 
-// Enviar mensaje de respuesta a Twilio
 function sendTwilioMessage(teneoResponse, res) {
   const message = teneoResponse.output.text;
   const twiml = new MessagingResponse();
@@ -85,23 +83,15 @@ function sendTwilioMessage(teneoResponse, res) {
   res.end(twiml.toString());
 }
 
-/***
- * SESSION HANDLER
- ***/
 function SessionHandler() {
   const sessionMap = new Map();
 
   return {
-    getSession: (userId) => {
-      return sessionMap.get(userId) || "";
-    },
-    setSession: (userId, sessionId) => {
-      sessionMap.set(userId, sessionId);
-    }
+    getSession: (userId) => sessionMap.get(userId) || "",
+    setSession: (userId, sessionId) => sessionMap.set(userId, sessionId)
   };
 }
 
-// Iniciar servidor HTTP
 http.createServer(app).listen(port, () => {
-  console.log(`Express server listening on port ${port}`);
+  console.log(`🚀 Servidor corriendo en el puerto ${port}`);
 });
